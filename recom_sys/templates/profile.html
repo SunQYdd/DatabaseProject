@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人信息</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .profile-card {
+            background: var(--surface-color);
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        .profile-card h2 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: var(--text-primary);
+            font-size: 1.8rem;
+        }
+        .profile-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .profile-item:last-child {
+            border-bottom: none;
+        }
+        .profile-item-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .profile-item-content {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: var(--text-primary);
+        }
+        .edit-btn {
+            padding: 0.4rem 1rem;
+            font-size: 0.85rem;
+            background-color: var(--background-color);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .edit-btn:hover {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        #avatarPreview {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header" style="margin-bottom: 2rem;">
+            <button class="back-btn" onclick="location.href='/'" style="position: absolute; top: 2rem; left: 0;">← 返回主页</button>
+            <h1>个人信息</h1>
+        </div>
+
+        <div class="profile-card">
+            <div class="profile-item">
+                <span class="profile-item-label">头像</span>
+                <div class="profile-item-content">
+                    <img id="avatarPreview" src="" alt="头像预览">
+                    <button id="editAvatarBtn" class="edit-btn">修改</button>
+                </div>
+            </div>
+            <div class="profile-item">
+                <span class="profile-item-label">用户名</span>
+                <div class="profile-item-content">
+                    <span id="profUsernameView"></span>
+                    <button id="editUsernameBtn" class="edit-btn">修改</button>
+                </div>
+            </div>
+            <div class="profile-item">
+                <span class="profile-item-label">邮箱</span>
+                <div class="profile-item-content">
+                    <span id="profEmailView"></span>
+                    <button id="editEmailBtn" class="edit-btn">修改</button>
+                </div>
+            </div>
+            <div class="profile-item">
+                <span class="profile-item-label">登录密码</span>
+                <div class="profile-item-content">
+                    <span>••••••••</span>
+                    <button id="editPasswordBtn" class="edit-btn">修改</button>
+                </div>
+            </div>
+            <div id="profileMsg" class="error-message" style="margin-top: 1.5rem;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Structure -->
+    <div id="modalOverlay" class="modal-overlay" style="display: none;">
+        <div id="editModal" class="modal-container">
+            <h3 id="modalTitle" class="modal-title"></h3>
+            <div id="modalBody" class="add-item-form"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const usernameView = document.getElementById('profUsernameView');
+            const emailView = document.getElementById('profEmailView');
+            const avatarPreview = document.getElementById('avatarPreview');
+            const profileMsg = document.getElementById('profileMsg');
+
+            const overlay = document.getElementById('modalOverlay');
+            const modal = document.getElementById('editModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+
+            let originalAvatarUrl = '';
+
+            function openModal(field) {
+                modalBody.innerHTML = '';
+                profileMsg.textContent = '';
+
+                const formContent = document.createElement('div');
+                const buttons = document.createElement('div');
+                buttons.className = 'modal-buttons';
+
+                const saveBtn = document.createElement('button');
+                saveBtn.textContent = '保存';
+                saveBtn.className = 'btn-submit';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.className = 'btn-cancel';
+                cancelBtn.addEventListener('click', closeModal);
+
+                buttons.appendChild(cancelBtn);
+                buttons.appendChild(saveBtn);
+
+                if (field === 'username') {
+                    modalTitle.textContent = '修改用户名';
+                    formContent.innerHTML = `
+                        <div class="form-group">
+                            <label for="usernameInput">用户名</label>
+                            <input type="text" id="usernameInput" value="${usernameView.textContent.trim()}">
+                        </div>
+                    `;
+                    saveBtn.addEventListener('click', function() {
+                        const val = document.getElementById('usernameInput').value.trim();
+                        if (!val) { profileMsg.textContent = '用户名不能为空'; return; }
+                        updateProfile({ username: val });
+                    });
+                } else if (field === 'email') {
+                    modalTitle.textContent = '修改邮箱';
+                    formContent.innerHTML = `
+                        <div class="form-group">
+                            <label for="emailInput">邮箱</label>
+                            <input type="email" id="emailInput" value="${emailView.textContent.trim()}">
+                        </div>
+                    `;
+                    saveBtn.addEventListener('click', function() {
+                        const val = document.getElementById('emailInput').value.trim();
+                        updateProfile({ email: val });
+                    });
+                } else if (field === 'avatar') {
+                    modalTitle.textContent = '修改头像';
+                    formContent.innerHTML = `
+                        <div class="form-group">
+                            <label for="avatarInput">头像URL</label>
+                            <input type="text" id="avatarInput" value="${originalAvatarUrl}">
+                            <img src="${avatarPreview.src}" style="max-width: 100px; margin-top: 1rem; border-radius: var(--radius-md);">
+                        </div>
+                    `;
+                    saveBtn.addEventListener('click', function() {
+                        const val = document.getElementById('avatarInput').value.trim();
+                        updateProfile({ avatarUrl: val });
+                    });
+                } else if (field === 'password') {
+                    modalTitle.textContent = '修改密码';
+                    formContent.innerHTML = `
+                        <div class="form-group">
+                            <label for="oldPasswordInput">旧密码</label>
+                            <input type="password" id="oldPasswordInput">
+                        </div>
+                        <div class="form-group">
+                            <label for="newPasswordInput">新密码</label>
+                            <input type="password" id="newPasswordInput">
+                        </div>
+                    `;
+                    saveBtn.addEventListener('click', function() {
+                        const oldPassword = document.getElementById('oldPasswordInput').value;
+                        const newPassword = document.getElementById('newPasswordInput').value;
+                        if (!oldPassword || !newPassword) {
+                            profileMsg.textContent = '密码不能为空';
+                            return;
+                        }
+                        updateProfile({ oldPassword: oldPassword, password: newPassword });
+                    });
+                }
+
+                modalBody.appendChild(formContent);
+                modalBody.appendChild(buttons);
+                overlay.style.display = 'flex';
+            }
+
+            function closeModal() {
+                overlay.style.display = 'none';
+                modalBody.innerHTML = '';
+            }
+
+            function updateProfile(payload) {
+                fetch('/api/user/profile', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        profileMsg.textContent = '更新成功！';
+                        fetchProfile();
+                        closeModal();
+                        setTimeout(() => profileMsg.textContent = '', 3000);
+                    } else if (data.code === 401) {
+                        window.location.href = '/login';
+                    } else {
+                        profileMsg.textContent = data.message || '更新失败';
+                    }
+                })
+                .catch(() => { profileMsg.textContent = '请求失败'; });
+            }
+
+            function fetchProfile() {
+                fetch('/api/user/profile')
+                    .then(r => {
+                        if (r.status === 401) {
+                            window.location.href = '/login';
+                            return null;
+                        }
+                        return r.json();
+                    })
+                    .then(data => {
+                        if (!data) return;
+                        if (data.code === 200) {
+                            const u = data.data;
+                            usernameView.textContent = u.username || '';
+                            emailView.textContent = u.email || '未设置';
+                            originalAvatarUrl = u.avatarUrl || '';
+                            avatarPreview.src = u.avatarUrl || 'https://via.placeholder.com/48.png?text=头像';
+                        } else {
+                            profileMsg.textContent = data.message || '加载失败';
+                        }
+                    })
+                    .catch(() => { profileMsg.textContent = '网络错误'; });
+            }
+
+            document.getElementById('editUsernameBtn').addEventListener('click', () => openModal('username'));
+            document.getElementById('editEmailBtn').addEventListener('click', () => openModal('email'));
+            document.getElementById('editAvatarBtn').addEventListener('click', () => openModal('avatar'));
+            document.getElementById('editPasswordBtn').addEventListener('click', () => openModal('password'));
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    closeModal();
+                }
+            });
+
+            fetchProfile();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的收藏</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>我的收藏</h1>
+            <button class="back-btn" onclick="window.history.back()">← 返回</button>
+        </div>
+        
+        <div class="favorites-content">
+            <div class="controls-container">
+                <div class="filter-tabs">
+                    <button class="filter-btn active" data-filter="all">全部</button>
+                    <button class="filter-btn" data-filter="books">图书</button>
+                    <button class="filter-btn" data-filter="movies">电影</button>
+                </div>
+            </div>
+            
+            <div class="items-grid" id="favorites-grid">
+                <!-- 收藏项目将在这里显示 -->
+                <div class="empty-favorites">
+                    <p>暂无收藏内容</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 收藏数据存储在本地存储中
+        document.addEventListener('DOMContentLoaded', function() {
+            const grid = document.getElementById('favorites-grid');
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            
+            // 加载收藏数据
+            loadFavorites();
+            
+            // 过滤按钮事件
+            filterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // 更新活动按钮
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // 过滤收藏内容
+                    const filterType = this.getAttribute('data-filter');
+                    filterFavorites(filterType);
+                });
+            });
+            
+            // 加载收藏数据
+            function loadFavorites() {
+                const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+                
+                if (favorites.length === 0) {
+                    grid.innerHTML = '<div class="empty-favorites"><p>暂无收藏内容</p></div>';
+                    return;
+                }
+                
+                displayFavorites(favorites);
+            }
+            
+            // 显示收藏内容
+            function displayFavorites(favorites) {
+                grid.innerHTML = '';
+                
+                favorites.forEach(item => {
+                    const card = createFavoriteCard(item);
+                    grid.appendChild(card);
+                });
+            }
+            
+            // 过滤收藏内容
+            function filterFavorites(filterType) {
+                const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+                
+                if (filterType === 'all') {
+                    displayFavorites(favorites);
+                    return;
+                }
+                
+                const filtered = favorites.filter(item => item.type === filterType);
+                displayFavorites(filtered);
+            }
+            
+            // 创建收藏卡片
+            function createFavoriteCard(item) {
+                const card = document.createElement('div');
+                card.className = 'item-card';
+                card.dataset.id = item.id;
+                card.dataset.type = item.type;
+                
+                const titleField = item.type === 'books' ? 'author' : 'director';
+                
+                card.innerHTML = `
+                    <img src="${item.cover}" alt="${item.title}" class="item-cover" onerror="this.onerror=null;this.src='https://via.placeholder.com/300x400.png?text=封面图片';">
+                    <div class="item-info">
+                        <h3 class="item-title">${item.title}</h3>
+                        <p class="item-${titleField}">${item.type === 'books' ? '作者' : '导演'}: ${item[titleField]}</p>
+                        <p class="item-year">年份: ${item.year}</p>
+                        <div class="item-rating">
+                            ★ <span>${item.rating}</span>
+                        </div>
+                        <button class="remove-favorite-btn">取消收藏</button>
+                    </div>
+                `;
+                
+                // 添加点击事件跳转到详情页
+                card.addEventListener('click', function(e) {
+                    if (!e.target.classList.contains('remove-favorite-btn')) {
+                        window.location.href = `/detail/${item.type}/${item.id}`;
+                    }
+                });
+                
+                // 添加取消收藏按钮事件
+                const removeBtn = card.querySelector('.remove-favorite-btn');
+                removeBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    removeFavorite(item.id, item.type);
+                });
+                
+                return card;
+            }
+            
+            // 取消收藏
+            function removeFavorite(id, type) {
+                let favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+                favorites = favorites.filter(item => !(item.id == id && item.type === type));
+                localStorage.setItem('favorites', JSON.stringify(favorites));
+                
+                // 重新加载显示
+                const activeFilter = document.querySelector('.filter-btn.active').getAttribute('data-filter');
+                filterFavorites(activeFilter);
+            }
+        });
+    </script>
+</body>
+</html>

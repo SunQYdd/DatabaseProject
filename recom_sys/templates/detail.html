@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ item.title }} - 详情</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ item.title }}</h1>
+            <button class="back-btn" onclick="history.back()">← 返回</button>
+        </div>
+        
+        <div class="detail-card-container">
+            <div class="detail-card">
+                <div class="detail-cover-wrapper">
+                    <img src="{{ item.cover }}" alt="{{ item.title }}" class="detail-cover" onerror="this.onerror=null;this.src='https://via.placeholder.com/300x400.png?text=封面图片';">
+                </div>
+                <div class="detail-info">
+                    <div class="type-tags">
+                        <span class="type-tag {% if item_type == 'books' %}book-tag{% else %}movie-tag{% endif %}">
+                            {% if item_type == 'books' %}图书{% else %}电影{% endif %}
+                        </span>
+                        {% if '科幻' in item.title or '三体' in item.title or '星际' in item.title %}
+                            <span class="type-tag genre-tag">科幻</span>
+                        {% endif %}
+                        {% if '红楼梦' in item.title or '围城' in item.title %}
+                            <span class="type-tag genre-tag">悬疑</span>
+                        {% endif %}
+                        {% if '平凡的世界' in item.title or '活着' in item.title or '阿甘正传' in item.title %}
+                            <span class="type-tag genre-tag">成长</span>
+                        {% endif %}
+                        {% if '红楼梦' in item.title or '百年孤独' in item.title %}
+                            <span class="type-tag genre-tag">经典</span>
+                        {% endif %}
+                        {% if '红楼梦' in item.title or '泰坦尼克号' in item.title %}
+                            <span class="type-tag genre-tag">爱情</span>
+                        {% endif %}
+                        {% if '平凡的世界' in item.title %}
+                            <span class="type-tag genre-tag">历史</span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="detail-meta">
+                        {% if item_type == 'books' %}
+                            <p><strong>作者：</strong> {{ item.author }}</p>
+                        {% else %}
+                            <p><strong>导演：</strong> {{ item.director }}</p>
+                        {% endif %}
+                        <p><strong>年份：</strong> {{ item.year }}</p>
+                        <p><strong>评分：</strong>
+                            <span class="rating-stars">
+                                {% for i in range(5) %}
+                                    {% if i < (item.rating / 2 | int) %}★{% else %}☆{% endif %}
+                                {% endfor %}
+                            </span>
+                            <span class="rating-value">{{ item.rating }}</span>
+                        </p>
+                        <p><strong>浏览次数：</strong> {{ item.views or 0 }} 次</p>
+                        <p><strong>评分人数：</strong> {{ item.rating_count or 0 }} 人</p>
+                    </div>
+
+                    <div class="interaction-section">
+                        <button id="favorite-btn" class="favorite-btn">
+                            <span class="heart-icon">❤</span>
+                            <span class="favorite-text">收藏</span>
+                        </button>
+                        <div class="user-rating">
+                            <p><strong>我的评分：</strong></p>
+                            <div class="rating-input">
+                                {% for i in range(1, 6) %}
+                                    <span class="star-rating" data-rating="{{ i }}">☆</span>
+                                {% endfor %}
+                                <span class="rating-text">点击星星评分</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-description-card">
+                <h3>简介</h3>
+                <p>{% if 'description' in item %}{{ item.description }}{% else %}这是一部备受好评的{% if item_type == 'books' %}图书{% else %}电影{% endif %}，拥有精彩的{% if item_type == 'books' %}故事情节和深刻的思想内涵{% else %}视觉效果和剧情发展{% endif %}。{% endif %}</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const stars = document.querySelectorAll('.star-rating');
+            const ratingText = document.querySelector('.rating-text');
+            let currentRating = 0;
+            
+            const favoriteBtn = document.getElementById('favorite-btn');
+            const favoriteText = favoriteBtn.querySelector('.favorite-text');
+            const itemType = "{{ item_type }}";
+            const itemId = "{{ item.id }}";
+            
+            const isFavoritedServer = {{ 'true' if item.isFavorited else 'false' }};
+            updateFavoriteBtn(isFavoritedServer);
+            
+            function updateFavoriteBtn(isFavorited) {
+                if (isFavorited) {
+                    favoriteText.textContent = '已收藏';
+                    favoriteBtn.classList.add('favorited');
+                } else {
+                    favoriteText.textContent = '收藏';
+                    favoriteBtn.classList.remove('favorited');
+                }
+            }
+            
+            favoriteBtn.addEventListener('click', function() {
+                toggleFavorite();
+            });
+
+            function toggleFavorite() {
+                fetch(`/api/user/items/${itemId}/favorite`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        updateFavoriteBtn(data.data.isFavorited);
+                    } else if (data.code === 401) {
+                        window.location.href = '/login';
+                    } else {
+                        alert(data.message || '操作失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('收藏操作失败:', error);
+                    alert('操作失败，请稍后重试');
+                });
+            }
+            
+            stars.forEach(star => {
+                star.addEventListener('mouseover', function() {
+                    const rating = parseInt(this.getAttribute('data-rating'));
+                    highlightStars(rating);
+                    ratingText.textContent = getRatingDescription(rating);
+                });
+                
+                star.addEventListener('mouseout', function() {
+                    highlightStars(currentRating);
+                    ratingText.textContent = currentRating > 0 ? `您的评分: ${currentRating}星` : '点击星星评分';
+                });
+                
+                star.addEventListener('click', function() {
+                    const rating = parseInt(this.getAttribute('data-rating'));
+                    currentRating = rating;
+                    ratingText.textContent = `您的评分: ${rating}星`;
+                    
+                    fetch(`/api/user/items/${itemId}/rate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ score: rating })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.code === 200) {
+                            alert('感谢您的评分!');
+                        } else if (data.code === 401) {
+                            window.location.href = '/login';
+                        } else {
+                            alert(data.message || '评分失败');
+                        }
+                    })
+                    .catch(error => console.error('评分失败:', error));
+                });
+            });
+
+            function highlightStars(rating) {
+                stars.forEach((star, index) => {
+                    star.textContent = index < rating ? '★' : '☆';
+                    star.classList.toggle('active', index < rating);
+                });
+            }
+            
+            function getRatingDescription(rating) {
+                const descriptions = { 1: '很差', 2: '较差', 3: '一般', 4: '推荐', 5: '力荐' };
+                return descriptions[rating];
+            }
+        });
+    </script>
+</body>
+</html>

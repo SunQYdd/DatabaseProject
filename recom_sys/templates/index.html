@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图书电影推荐系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>个性化推荐系统</h1>
+            <p>为您推荐最优质的图书与电影</p>
+        </div>
+        
+        <div class="nav-tabs">
+            <button class="tab-btn active" data-tab="books">图书推荐</button>
+            <button class="tab-btn" data-tab="movies">电影推荐</button>
+            <button class="tab-btn" data-tab="book-catalog">图书目录</button>
+            <button class="tab-btn" data-tab="movie-catalog">电影大全</button>
+            <button class="tab-btn" data-tab="new-category">分类</button>
+        </div>
+        
+        <!-- 图书推荐内容 -->
+        <div id="books" class="content-section active">
+            <div class="items-grid"></div>
+        </div>
+        
+        <!-- 电影推荐内容 -->
+        <div id="movies" class="content-section">
+            <div class="items-grid"></div>
+        </div>
+        
+        <!-- 图书目录内容 -->
+        <div id="book-catalog" class="content-section">
+            <div class="controls-container">
+                <div class="search-container">
+                    <input type="text" class="search-input" placeholder="搜索图书..." data-type="books">
+                    <button class="search-button">搜索</button>
+                </div>
+                <button class="add-button" data-type="books">➕ 添加图书</button>
+            </div>
+            <div class="items-grid"></div>
+        </div>
+        
+        <!-- 电影大全内容 -->
+        <div id="movie-catalog" class="content-section">
+            <div class="controls-container">
+                <div class="search-container">
+                    <input type="text" class="search-input" placeholder="搜索电影..." data-type="movies">
+                    <button class="search-button">搜索</button>
+                </div>
+                <button class="add-button" data-type="movies">➕ 添加电影</button>
+            </div>
+            <div class="items-grid"></div>
+        </div>
+        
+        <!-- 新分类内容 -->
+        <div id="new-category" class="content-section">
+            <div class="tags-container">
+                <h3>选择标签筛选:</h3>
+                <div class="tags-list">
+                    <button class="tag-btn active" data-tag="all">全部</button>
+                    <button class="tag-btn" data-tag="science-fiction">科幻</button>
+                    <button class="tag-btn" data-tag="mystery">悬疑</button>
+                    <button class="tag-btn" data-tag="growth">成长</button>
+                    <button class="tag-btn" data-tag="classic">经典</button>
+                    <button class="tag-btn" data-tag="romance">爱情</button>
+                    <button class="tag-btn" data-tag="history">历史</button>
+                </div>
+            </div>
+            <div class="items-grid"></div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 图书电影推荐系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container login-page">
+        <div class="login-content">
+            <div class="header">
+                <h1>个性化推荐系统</h1>
+                <p>登录以获取个性化推荐</p>
+            </div>
+            
+            <div class="login-form" id="loginFormContainer">
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">用户名:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">密码:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <button type="submit" class="login-btn">登录</button>
+                
+                <div id="errorMessage" class="error-message"></div>
+            </form>
+            <div style="text-align:center;margin-top:1rem;">
+                <a href="#" id="showRegister">没有账号？注册</a>
+            </div>
+        </div>
+        <div class="login-form" id="registerForm" style="display:none;">
+            <form id="registerFormInner">
+                <div class="form-group">
+                    <label for="regUsername">用户名:</label>
+                    <input type="text" id="regUsername" name="regUsername" required>
+                </div>
+                <div class="form-group">
+                    <label for="regEmail">邮箱 (选填):</label>
+                    <input type="email" id="regEmail" name="regEmail">
+                </div>
+                <div class="form-group">
+                    <label for="regPassword">密码:</label>
+                    <input type="password" id="regPassword" name="regPassword" required>
+                </div>
+                <button type="submit" class="login-btn">注册</button>
+                <div id="regErrorMessage" class="error-message"></div>
+            </form>
+            <div style="text-align:center;margin-top:1rem;">
+                <a href="#" id="showLogin">已有账号？登录</a>
+            </div>
+        </div>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            
+            // 简单验证（实际项目中应在服务器端验证）
+            if (username && password) {
+                // 发送登录请求
+                fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if ((data && data.code === 200) || data.success) {
+                        window.location.href = '/';
+                    } else {
+                        errorMessage.textContent = data.message || '登录失败';
+                    }
+                })
+                .catch(error => {
+                    errorMessage.textContent = '登录请求失败，请稍后再试';
+                });
+            } else {
+                errorMessage.textContent = '请输入用户名和密码';
+            }
+        });
+
+        const showRegister = document.getElementById('showRegister');
+        const showLogin = document.getElementById('showLogin');
+        const loginFormContainer = document.getElementById('loginFormContainer');
+        const registerForm = document.getElementById('registerForm');
+
+        showRegister.addEventListener('click', function(e) {
+            e.preventDefault();
+            loginFormContainer.style.display = 'none';
+            registerForm.style.display = 'block';
+        });
+
+        showLogin.addEventListener('click', function(e) {
+            e.preventDefault();
+            registerForm.style.display = 'none';
+            loginFormContainer.style.display = 'block';
+        });
+
+        document.getElementById('registerFormInner').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const regErrorMessage = document.getElementById('regErrorMessage');
+
+            if (username && password) {
+                const payload = { username, password };
+                if (email) {
+                    payload.email = email;
+                }
+                
+                fetch('/api/public/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.code === 200) {
+                        regErrorMessage.textContent = '注册成功，请使用新账号登录';
+                        registerForm.style.display = 'none';
+                        loginFormContainer.style.display = 'block';
+                        document.getElementById('username').value = username;
+                        document.getElementById('password').focus();
+                    } else {
+                        regErrorMessage.textContent = data.message || '注册失败';
+                    }
+                })
+                .catch(() => {
+                    regErrorMessage.textContent = '注册请求失败，请稍后再试';
+                });
+            } else {
+                regErrorMessage.textContent = '请填写用户名和密码';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -174,7 +174,7 @@ body {
     display: inline-block;
 }
 
-.profile-btn, .logout-btn, .add-button {
+.profile-btn, .logout-btn, .add-button, .delete-button {
     padding: 0.75rem 1.5rem;
     border: none;
     border-radius: var(--radius-full);
@@ -212,6 +212,22 @@ body {
 .add-button:hover {
     transform: translateY(-2px);
     box-shadow: 0 10px 15px rgba(16, 185, 129, 0.3);
+}
+
+.delete-button {
+    background: linear-gradient(135deg, var(--danger-color), var(--danger-hover));
+    color: white;
+    box-shadow: 0 4px 6px rgba(239, 68, 68, 0.2);
+}
+
+.delete-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px rgba(239, 68, 68, 0.3);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
 }
 
 .logout-btn {

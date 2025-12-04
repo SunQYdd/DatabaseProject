@@ -93,6 +93,24 @@
                 </div>
             </div>
             <div class="profile-item">
+                <span class="profile-item-label">用户ID</span>
+                <div class="profile-item-content">
+                    <span id="profUserIdView"></span>
+                </div>
+            </div>
+            <div class="profile-item">
+                <span class="profile-item-label">状态</span>
+                <div class="profile-item-content">
+                    <span id="profStatusView"></span>
+                </div>
+            </div>
+            <div class="profile-item">
+                <span class="profile-item-label">注册时间</span>
+                <div class="profile-item-content">
+                    <span id="profCreatedAtView"></span>
+                </div>
+            </div>
+            <div class="profile-item">
                 <span class="profile-item-label">登录密码</span>
                 <div class="profile-item-content">
                     <span>••••••••</span>
@@ -117,6 +135,9 @@
             const emailView = document.getElementById('profEmailView');
             const avatarPreview = document.getElementById('avatarPreview');
             const profileMsg = document.getElementById('profileMsg');
+            const userIdView = document.getElementById('profUserIdView');
+            const statusView = document.getElementById('profStatusView');
+            const createdAtView = document.getElementById('profCreatedAtView');
 
             const overlay = document.getElementById('modalOverlay');
             const modal = document.getElementById('editModal');
@@ -255,6 +276,9 @@
                             emailView.textContent = u.email || '未设置';
                             originalAvatarUrl = u.avatarUrl || '';
                             avatarPreview.src = u.avatarUrl || 'https://via.placeholder.com/48.png?text=头像';
+                            userIdView.textContent = (u.userId !== undefined && u.userId !== null) ? u.userId : '';
+                            statusView.textContent = (u.status !== undefined && u.status !== null) ? u.status : '';
+                            createdAtView.textContent = u.createdAt || '';
                         } else {
                             profileMsg.textContent = data.message || '加载失败';
                         }

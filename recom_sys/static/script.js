@@ -44,20 +44,24 @@ document.addEventListener('DOMContentLoaded', function() {
     profileMenu.className = 'dropdown-menu'; // 使用 style.css 中的 dropdown-menu
     
     const menuItems = [
-        { text: '个人信息', icon: '👤', action: () => { window.location.href = '/profile'; } },
+        { text: '个人信息', icon: '👤', href: '/profile' },
         { text: '我的收藏', icon: '❤️', action: () => showFavorites() }
     ];
     
     menuItems.forEach(item => {
-        const btn = document.createElement('button');
-        btn.className = 'dropdown-item'; // 使用 style.css 中的 dropdown-item
-        btn.innerHTML = `<span style="margin-right: 8px">${item.icon}</span>${item.text}`;
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            item.action();
-            profileMenu.classList.remove('show');
-        });
-        profileMenu.appendChild(btn);
+        const el = item.href ? document.createElement('a') : document.createElement('button');
+        el.className = 'dropdown-item'; // 使用 style.css 中的 dropdown-item
+        el.innerHTML = `<span style="margin-right: 8px">${item.icon}</span>${item.text}`;
+        if (item.href) {
+            el.setAttribute('href', item.href);
+        } else if (item.action) {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                item.action();
+                profileMenu.classList.remove('show');
+            });
+        }
+        profileMenu.appendChild(el);
     });
     
     // 组装个人区域
@@ -160,6 +164,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // 为搜索框添加事件监听器
+    document.querySelectorAll('.delete-button').forEach(button => {
+        button.addEventListener('click', function() {
+            const type = this.getAttribute('data-type');
+            showDeleteForm(type);
+        });
+    });
+    
+    
     document.querySelectorAll('.search-input').forEach(input => {
         input.addEventListener('keyup', function(event) {
             if (event.key === 'Enter') {
@@ -352,6 +364,124 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(modal);
     }
     
+    // 显示删除表单
+    function showDeleteForm(type) {
+        // 创建模态框
+        const modal = document.createElement('div');
+        modal.className = 'modal modal-overlay';
+        
+        // 创建表单容器
+        const formContainer = document.createElement('div');
+        formContainer.className = 'modal-container';
+        
+        // 表单标题
+        const title = document.createElement('h2');
+        title.textContent = type === 'books' ? '删除图书' : '删除电影';
+        title.className = 'modal-title';
+        
+        // 创建表单
+        const form = document.createElement('form');
+        form.className = 'add-item-form';
+        
+        const formContent = document.createElement('div');
+        formContent.className = 'form-group';
+        formContent.innerHTML = `
+            <label for="deleteItemSelect">选择要删除的项目:</label>
+            <select id="deleteItemSelect" style="width: 100%; padding: 0.5rem; margin-top: 0.5rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);" required>
+                <option value="">加载中...</option>
+            </select>
+        `;
+        
+        form.appendChild(formContent);
+        
+        // 创建按钮容器
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'modal-buttons';
+        
+        // 创建提交按钮
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.textContent = '删除';
+        submitButton.className = 'btn-submit';
+        submitButton.style.background = 'var(--danger-color)'; // Override color for danger action
+        
+        // 创建取消按钮
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.textContent = '取消';
+        cancelButton.className = 'btn-cancel';
+        
+        // 添加事件监听器
+        cancelButton.addEventListener('click', function() {
+            document.body.removeChild(modal);
+        });
+        
+        // 组装模态框
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(submitButton);
+        form.appendChild(buttonContainer);
+        formContainer.appendChild(title);
+        formContainer.appendChild(form);
+        modal.appendChild(formContainer);
+        document.body.appendChild(modal);
+        
+        // 加载项目列表
+        const apiType = type === 'books' ? 'book' : 'movie';
+        // 获取足够多的数据以供选择
+        fetch(`/api/public/items?type=${apiType}&size=1000`)
+            .then(res => res.json())
+            .then(result => {
+                const select = document.getElementById('deleteItemSelect');
+                select.innerHTML = '<option value="">请选择...</option>';
+                if (result.code === 200 && result.data.records) {
+                    result.data.records.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.itemId;
+                        option.textContent = item.title;
+                        select.appendChild(option);
+                    });
+                } else {
+                     select.innerHTML = '<option value="">加载失败</option>';
+                }
+            })
+            .catch(err => {
+                console.error('加载列表失败:', err);
+                document.getElementById('deleteItemSelect').innerHTML = '<option value="">加载失败</option>';
+            });
+            
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const itemId = document.getElementById('deleteItemSelect').value;
+            if (!itemId) {
+                alert('请选择一个项目');
+                return;
+            }
+            
+            if (!confirm('确定要删除吗？此操作不可恢复，且会删除相关标签数据。')) {
+                return;
+            }
+            
+            fetch(`/api/items/${itemId}`, {
+                method: 'DELETE'
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.code === 200) {
+                    alert('删除成功');
+                    document.body.removeChild(modal);
+                    // 重新加载数据
+                    loadItems(type === 'books' ? 'book-catalog' : 'movie-catalog');
+                } else {
+                    alert('删除失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(err => {
+                console.error('删除请求失败:', err);
+                alert('删除请求失败，请重试');
+            });
+        });
+    }
+
     // 执行搜索功能
     function performSearch(searchInput) {
         const searchTerm = searchInput.value.trim().toLowerCase();

@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request, session, redirect, u
 from datetime import datetime
 import math
 import os
+import hashlib
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 在生产环境中应该使用更安全的密钥
@@ -15,6 +16,7 @@ OPENGAUSS_PORT = int(_env('OPENGAUSS_PORT', '26000'))
 OPENGAUSS_DB = _env('OPENGAUSS_DB', 'mytest')
 OPENGAUSS_USER = _env('OPENGAUSS_USER', 'sqy')
 OPENGAUSS_PASSWORD = _env('OPENGAUSS_PASSWORD', '451278963Qwe')
+OPENGAUSS_SSLMODE = _env('OPENGAUSS_SSLMODE')
 # jdbc:postgresql://139.9.116.109:26000/mytest
 DATABASE_URL = _env('DATABASE_URL', f'postgresql://{OPENGAUSS_USER}:{OPENGAUSS_PASSWORD}@{OPENGAUSS_HOST}:{OPENGAUSS_PORT}/{OPENGAUSS_DB}')
 app.config['DATABASE_URL'] = DATABASE_URL
@@ -23,24 +25,31 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True, 'pool_recycle'
 
 DB = None
 
+def _hash_password(p):
+    s = os.environ.get('PASSWORD_SALT') or ''
+    return hashlib.md5((p + s).encode('utf-8')).hexdigest()
+
 def init_db():
     global DB
     try:
-        from sqlalchemy import create_engine
-        engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'], **app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
-        DB = {'type': 'sqlalchemy', 'engine': engine}
+        import psycopg2
+        kwargs = {
+            'host': OPENGAUSS_HOST,
+            'port': OPENGAUSS_PORT,
+            'dbname': OPENGAUSS_DB,
+            'user': OPENGAUSS_USER,
+            'password': OPENGAUSS_PASSWORD
+        }
+        if OPENGAUSS_SSLMODE:
+            kwargs['sslmode'] = OPENGAUSS_SSLMODE
+        conn = psycopg2.connect(**kwargs)
+        DB = {'type': 'psycopg2', 'conn': conn}
         return DB
     except Exception:
         try:
-            import psycopg2
-            conn = psycopg2.connect(
-                host=OPENGAUSS_HOST,
-                port=OPENGAUSS_PORT,
-                dbname=OPENGAUSS_DB,
-                user=OPENGAUSS_USER,
-                password=OPENGAUSS_PASSWORD
-            )
-            DB = {'type': 'psycopg2', 'conn': conn}
+            from sqlalchemy import create_engine
+            engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'], **app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}))
+            DB = {'type': 'sqlalchemy', 'engine': engine}
             return DB
         except Exception:
             DB = None
@@ -51,7 +60,26 @@ def get_db_connection():
         return None
     if DB.get('type') == 'sqlalchemy':
         return DB['engine'].connect()
-    return DB.get('conn')
+    if DB.get('type') == 'psycopg2':
+        conn = DB.get('conn')
+        try:
+            if not conn or getattr(conn, 'closed', 1) != 0:
+                import psycopg2
+                kwargs = {
+                    'host': OPENGAUSS_HOST,
+                    'port': OPENGAUSS_PORT,
+                    'dbname': OPENGAUSS_DB,
+                    'user': OPENGAUSS_USER,
+                    'password': OPENGAUSS_PASSWORD
+                }
+                if OPENGAUSS_SSLMODE:
+                    kwargs['sslmode'] = OPENGAUSS_SSLMODE
+                DB['conn'] = psycopg2.connect(**kwargs)
+                conn = DB['conn']
+        except Exception:
+            return None
+        return conn
+    return None
 
 init_db()
 
@@ -183,36 +211,87 @@ def profile_page():
 
 @app.route('/detail/<item_type>/<int:item_id>')
 def detail(item_type, item_id):
-    """详情页面"""
     if 'username' not in session:
         return redirect(url_for('login_page'))
-    
-    item = get_item_by_id(item_id)
-    if not item:
-        return "项目未找到", 404
-    
-    # 注入标签信息以便模板显示（如果模板支持）
-    item_copy = item.copy()
-    item_copy['tags'] = get_item_tags(item_id)
-    
-    # 检查是否收藏
-    user = get_current_user()
-    is_favorited = False
-    if user:
-        is_favorited = any(f['userId'] == user['userId'] and f['itemId'] == item_id for f in FAVORITES)
-    item_copy['isFavorited'] = is_favorited
-    
-    # 兼容旧模板变量名 (id, title, author/director, year, rating, cover, description)
-    item_copy['id'] = item['itemId']
-    item_copy['year'] = item['releaseYear']
-    item_copy['rating'] = item['ratingAvg']
-    item_copy['cover'] = item['coverUrl']
-    if item['type'] == 'book':
-        item_copy['author'] = item['authorDirector']
-    else:
-        item_copy['director'] = item['authorDirector']
 
-    return render_template('detail.html', item=item_copy, item_type=item_type)
+    conn = get_db_connection()
+    if conn is not None:
+        try:
+            if DB.get('type') == 'sqlalchemy':
+                from sqlalchemy import text
+                r = conn.execute(text("SELECT item_id, title, type, author_director, release_year, rating_avg, rating_count, view_count, cover_url, description FROM tb_items WHERE item_id=:id"), {'id': item_id}).fetchone()
+                if not r:
+                    conn.close()
+                    return "项目未找到", 404
+                item_copy = {
+                    'itemId': r[0],
+                    'title': r[1],
+                    'type': r[2],
+                    'authorDirector': r[3],
+                    'releaseYear': r[4],
+                    'ratingAvg': float(r[5]) if r[5] is not None else 0.0,
+                    'ratingCount': int(r[6]) if r[6] is not None else 0,
+                    'viewCount': int(r[7]) if r[7] is not None else 0,
+                    'coverUrl': r[8],
+                    'description': r[9]
+                }
+                trows = conn.execute(text("SELECT t.tag_name FROM tb_item_tags it JOIN tb_tags t ON t.tag_id=it.tag_id WHERE it.item_id=:id"), {'id': item_id}).fetchall()
+                item_copy['tags'] = [x[0] for x in trows]
+                user = get_current_user()
+                item_copy['isFavorited'] = False
+                item_copy['userRating'] = None
+                if user:
+                    fav = conn.execute(text("SELECT 1 FROM tb_favorites WHERE user_id=:uid AND item_id=:iid"), {'uid': user['userId'], 'iid': item_id}).fetchone()
+                    item_copy['isFavorited'] = bool(fav)
+                    rrow = conn.execute(text("SELECT score FROM tb_ratings WHERE user_id=:uid AND item_id=:iid"), {'uid': user['userId'], 'iid': item_id}).fetchone()
+                    if rrow:
+                        item_copy['userRating'] = int(rrow[0])
+                item_copy['id'] = item_copy['itemId']
+                item_copy['year'] = item_copy['releaseYear']
+                item_copy['rating'] = item_copy['ratingAvg']
+                item_copy['cover'] = item_copy['coverUrl']
+                if item_copy['type'] == 'book':
+                    item_copy['author'] = item_copy['authorDirector']
+                else:
+                    item_copy['director'] = item_copy['authorDirector']
+                conn.close()
+                return render_template('detail.html', item=item_copy, item_type=item_type)
+            else:
+                cur = conn.cursor()
+                cur.execute("SELECT item_id, title, type, author_director, release_year, rating_avg, rating_count, view_count, cover_url, description FROM tb_items WHERE item_id=%s", (item_id,))
+                r = cur.fetchone()
+                if not r:
+                    cur.close()
+                    return "项目未找到", 404
+                item_copy = {
+                    'itemId': r[0], 'title': r[1], 'type': r[2], 'authorDirector': r[3], 'releaseYear': r[4], 'ratingAvg': float(r[5]) if r[5] is not None else 0.0, 'ratingCount': int(r[6]) if r[6] is not None else 0, 'viewCount': int(r[7]) if r[7] is not None else 0, 'coverUrl': r[8], 'description': r[9]
+                }
+                cur.execute("SELECT t.tag_name FROM tb_item_tags it JOIN tb_tags t ON t.tag_id=it.tag_id WHERE it.item_id=%s", (item_id,))
+                item_copy['tags'] = [x[0] for x in cur.fetchall()]
+                user = get_current_user()
+                item_copy['isFavorited'] = False
+                item_copy['userRating'] = None
+                if user:
+                    cur.execute("SELECT 1 FROM tb_favorites WHERE user_id=%s AND item_id=%s", (user['userId'], item_id))
+                    item_copy['isFavorited'] = cur.fetchone() is not None
+                    cur.execute("SELECT score FROM tb_ratings WHERE user_id=%s AND item_id=%s", (user['userId'], item_id))
+                    rrow = cur.fetchone()
+                    if rrow:
+                        item_copy['userRating'] = int(rrow[0])
+                cur.close()
+                item_copy['id'] = item_copy['itemId']
+                item_copy['year'] = item_copy['releaseYear']
+                item_copy['rating'] = item_copy['ratingAvg']
+                item_copy['cover'] = item_copy['coverUrl']
+                if item_copy['type'] == 'book':
+                    item_copy['author'] = item_copy['authorDirector']
+                else:
+                    item_copy['director'] = item_copy['authorDirector']
+                return render_template('detail.html', item=item_copy, item_type=item_type)
+        except Exception:
+            pass
+
+    return "数据库不可用", 500
 
 # ==========================================
 # 4. API 接口 (API Routes)
@@ -228,6 +307,7 @@ def api_register():
     email = data.get('email')
     now_dt = datetime.now()
     new_id = None
+    hashed = _hash_password(password or '')
     conn = get_db_connection()
     if conn is not None:
         try:
@@ -237,7 +317,7 @@ def api_register():
                     exists = conn.execute(text("SELECT 1 FROM tb_users WHERE username=:username"), {"username": username}).fetchone()
                     if exists:
                         return jsonify({"code": 400, "message": "用户名已存在", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
-                    row = conn.execute(text("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (:username, :password, :email, :avatar_url, :status, :created_at) RETURNING user_id"), {"username": username, "password": password, "email": email, "avatar_url": None, "status": 1, "created_at": now_dt}).fetchone()
+                    row = conn.execute(text("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (:username, :password, :email, :avatar_url, :status, :created_at) RETURNING user_id"), {"username": username, "password": hashed, "email": email, "avatar_url": None, "status": 1, "created_at": now_dt}).fetchone()
                     if row:
                         new_id = row[0]
                 conn.close()
@@ -247,7 +327,7 @@ def api_register():
                 if cur.fetchone():
                     cur.close()
                     return jsonify({"code": 400, "message": "用户名已存在", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
-                cur.execute("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id", (username, password, email, None, 1, now_dt))
+                cur.execute("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id", (username, hashed, email, None, 1, now_dt))
                 row = cur.fetchone()
                 if row:
                     new_id = row[0]
@@ -258,14 +338,14 @@ def api_register():
                 if DB.get('type') == 'sqlalchemy':
                     from sqlalchemy import text
                     conn.execute(text("CREATE TABLE IF NOT EXISTS tb_users (user_id BIGSERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, email VARCHAR(100), avatar_url VARCHAR(255), status SMALLINT NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL)"))
-                    row = conn.execute(text("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (:username, :password, :email, :avatar_url, :status, :created_at) RETURNING user_id"), {"username": username, "password": password, "email": email, "avatar_url": None, "status": 1, "created_at": now_dt}).fetchone()
+                    row = conn.execute(text("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (:username, :password, :email, :avatar_url, :status, :created_at) RETURNING user_id"), {"username": username, "password": hashed, "email": email, "avatar_url": None, "status": 1, "created_at": now_dt}).fetchone()
                     if row:
                         new_id = row[0]
                     conn.close()
                 else:
                     cur = conn.cursor()
                     cur.execute("CREATE TABLE IF NOT EXISTS tb_users (user_id BIGSERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, email VARCHAR(100), avatar_url VARCHAR(255), status SMALLINT NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL)")
-                    cur.execute("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id", (username, password, email, None, 1, now_dt))
+                    cur.execute("INSERT INTO tb_users (username, password, email, avatar_url, status, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id", (username, hashed, email, None, 1, now_dt))
                     row = cur.fetchone()
                     if row:
                         new_id = row[0]
@@ -279,7 +359,7 @@ def api_register():
         new_user = {
             "userId": len(USERS) + 1,
             "username": username,
-            "password": password,
+            "password": hashed,
             "email": email,
             "avatarUrl": None,
             "status": 1,
@@ -295,7 +375,7 @@ def api_register():
     USERS.append({
         "userId": new_id,
         "username": username,
-        "password": password,
+        "password": hashed,
         "email": email,
         "avatarUrl": None,
         "status": 1,
@@ -331,7 +411,7 @@ def api_public_login():
                 if not exists_row:
                     conn.close()
                     return jsonify({"code": 401, "message": "用户不存在", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
-                if exists_row[1] != password:
+                if exists_row[1] != _hash_password(password):
                     conn.close()
                     return jsonify({"code": 401, "message": "用户名或密码错误", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
                 session['username'] = username
@@ -353,7 +433,7 @@ def api_public_login():
                 cur.close()
                 if not exists_row:
                     return jsonify({"code": 401, "message": "用户不存在", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
-                if exists_row[1] != password:
+                if exists_row[1] != _hash_password(password):
                     return jsonify({"code": 401, "message": "用户名或密码错误", "data": None, "timestamp": int(datetime.now().timestamp() * 1000)})
                 session['username'] = username
                 return jsonify({
@@ -396,6 +476,10 @@ def api_get_items():
     item_type = request.args.get('type')
     keyword = request.args.get('keyword', '').lower()
     tag_id = request.args.get('tagId')
+    sort_by = request.args.get('sortBy', 'createdAt')
+    order = request.args.get('order', 'desc').lower()
+    if order not in ('asc','desc'):
+        order = 'desc'
 
     conn = get_db_connection()
     if conn is not None:
@@ -423,7 +507,9 @@ def api_get_items():
                 count_sql = f"SELECT COUNT(*) FROM tb_items i {join} {where_sql}"
                 total = conn.execute(text(count_sql), params).scalar() or 0
                 offset = (page - 1) * size
-                list_sql = f"SELECT i.item_id, i.title, i.type, i.author_director, i.release_year, i.rating_avg, i.rating_count, i.view_count, i.cover_url, i.description FROM tb_items i {join} {where_sql} ORDER BY i.created_at DESC LIMIT :size OFFSET :offset"
+                col_map = {'createdAt': 'i.created_at', 'ratingAvg': 'i.rating_avg', 'viewCount': 'i.view_count'}
+                sort_col = col_map.get(sort_by, 'i.created_at')
+                list_sql = f"SELECT i.item_id, i.title, i.type, i.author_director, i.release_year, i.rating_avg, i.rating_count, i.view_count, i.cover_url, i.description FROM tb_items i {join} {where_sql} ORDER BY {sort_col} {order.upper()} LIMIT :size OFFSET :offset"
                 params['size'] = size
                 params['offset'] = offset
                 rows = conn.execute(text(list_sql), params).fetchall()
@@ -483,7 +569,9 @@ def api_get_items():
                 cur.execute(f"SELECT COUNT(*) FROM tb_items i {join} {where_sql}", params)
                 total = cur.fetchone()[0]
                 offset = (page - 1) * size
-                cur.execute(f"SELECT i.item_id, i.title, i.type, i.author_director, i.release_year, i.rating_avg, i.rating_count, i.view_count, i.cover_url, i.description FROM tb_items i {join} {where_sql} ORDER BY i.created_at DESC LIMIT %s OFFSET %s", params + [size, offset])
+                col_map = {'createdAt': 'i.created_at', 'ratingAvg': 'i.rating_avg', 'viewCount': 'i.view_count'}
+                sort_col = col_map.get(sort_by, 'i.created_at')
+                cur.execute(f"SELECT i.item_id, i.title, i.type, i.author_director, i.release_year, i.rating_avg, i.rating_count, i.view_count, i.cover_url, i.description FROM tb_items i {join} {where_sql} ORDER BY {sort_col} {order.upper()} LIMIT %s OFFSET %s", params + [size, offset])
                 rows = cur.fetchall()
                 records = []
                 for r in rows:
@@ -525,6 +613,37 @@ def api_get_items():
                 })
         except Exception:
             pass
+    # 数据库不可用时，对于图书/电影目录不再使用内存数据，直接返回数据库不可用
+    if item_type in ('book','books','movie','movies'):
+        return jsonify({
+            'code': 500,
+            'message': '数据库不可用',
+            'data': {
+                'currentPage': page,
+                'pageSize': size,
+                'total': 0,
+                'totalPages': 0,
+                'records': [],
+                'hasPrevious': False,
+                'hasNext': False
+            },
+            'timestamp': int(datetime.now().timestamp() * 1000)
+        }), 500
+    if tag_id:
+        return jsonify({
+            'code': 500,
+            'message': '数据库不可用',
+            'data': {
+                'currentPage': page,
+                'pageSize': size,
+                'total': 0,
+                'totalPages': 0,
+                'records': [],
+                'hasPrevious': False,
+                'hasNext': False
+            },
+            'timestamp': int(datetime.now().timestamp() * 1000)
+        }), 500
 
     filtered_items = ITEMS
     if item_type:
@@ -540,6 +659,15 @@ def api_get_items():
         tag_id = int(tag_id)
         item_ids_with_tag = [it['itemId'] for it in ITEM_TAGS if it['tagId'] == tag_id]
         filtered_items = [i for i in filtered_items if i['itemId'] in item_ids_with_tag]
+    col_map_mem = {'createdAt': 'createdAt', 'ratingAvg': 'ratingAvg', 'viewCount': 'viewCount'}
+    sort_key = col_map_mem.get(sort_by, 'createdAt')
+    try:
+        if sort_key == 'createdAt':
+            filtered_items = sorted(filtered_items, key=lambda i: i.get('createdAt') or '', reverse=(order=='desc'))
+        else:
+            filtered_items = sorted(filtered_items, key=lambda i: i.get(sort_key) or 0, reverse=(order=='desc'))
+    except Exception:
+        pass
     total = len(filtered_items)
     start = (page - 1) * size
     end = start + size
@@ -621,20 +749,7 @@ def api_get_item_detail(item_id):
                 return jsonify({'code': 200, 'message': 'success', 'data': item_res, 'timestamp': int(datetime.now().timestamp() * 1000)})
         except Exception:
             pass
-    item = get_item_by_id(item_id)
-    if not item:
-        return jsonify({'code': 404, 'message': '资源不存在', 'data': None}), 404
-    item_res = item.copy()
-    item_res['tags'] = get_item_tags(item_id)
-    user = get_current_user()
-    item_res['isFavorited'] = False
-    item_res['userRating'] = None
-    if user:
-        item_res['isFavorited'] = any(f['userId'] == user['userId'] and f['itemId'] == item_id for f in FAVORITES)
-        rating = next((r for r in RATINGS if r['userId'] == user['userId'] and r['itemId'] == item_id), None)
-        if rating:
-            item_res['userRating'] = rating['score']
-    return jsonify({'code': 200, 'message': 'success', 'data': item_res, 'timestamp': int(datetime.now().timestamp() * 1000)})
+    return jsonify({'code': 500, 'message': '数据库不可用', 'data': None, 'timestamp': int(datetime.now().timestamp() * 1000)}), 500
 
 @app.route('/api/public/tags', methods=['GET'])
 def api_get_tags():
@@ -862,8 +977,20 @@ def api_add_item():
             author_director = item_data.get('author') if type_str == 'books' else item_data.get('director')
             if DB.get('type') == 'sqlalchemy':
                 from sqlalchemy import text
-                row = conn.execute(text("INSERT INTO tb_items (title, type, author_director, release_year, rating_avg, rating_count, view_count, cover_url, description, created_at) VALUES (:title, :type, :ad, :year, :rating, 0, 0, :cover, :desc, :ts) RETURNING item_id"), {'title': item_data.get('title'), 'type': content_type, 'ad': author_director, 'year': int(item_data.get('year')), 'rating': float(item_data.get('rating')), 'cover': item_data.get('cover'), 'desc': item_data.get('description'), 'ts': datetime.now()}).fetchone()
-                return jsonify({'success': True, 'message': '添加成功', 'data': {'itemId': row[0]}})
+                with conn.begin():
+                    row = conn.execute(text("INSERT INTO tb_items (title, type, author_director, release_year, rating_avg, rating_count, view_count, cover_url, description, created_at) VALUES (:title, :type, :ad, :year, :rating, 0, 0, :cover, :desc, :ts) RETURNING item_id"), {
+                        'title': item_data.get('title'),
+                        'type': content_type,
+                        'ad': author_director,
+                        'year': int(item_data.get('year')),
+                        'rating': float(item_data.get('rating')),
+                        'cover': item_data.get('cover'),
+                        'desc': item_data.get('description'),
+                        'ts': datetime.now()
+                    }).fetchone()
+                resp = jsonify({'success': True, 'message': '添加成功', 'data': {'itemId': row[0]}})
+                conn.close()
+                return resp
             else:
                 cur = conn.cursor()
                 cur.execute("INSERT INTO tb_items (title, type, author_director, release_year, rating_avg, rating_count, view_count, cover_url, description, created_at) VALUES (%s, %s, %s, %s, %s, 0, 0, %s, %s, %s) RETURNING item_id", (item_data.get('title'), content_type, author_director, int(item_data.get('year')), float(item_data.get('rating')), item_data.get('cover'), item_data.get('description'), datetime.now()))
